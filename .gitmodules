@@ -1,0 +1,3 @@
+[submodule "XmlManager"]
+	path = XmlManager
+	url = https://github.com/dahvyd/XmlManager.git
