@@ -23,7 +23,7 @@ namespace Scrubber
             XmlNode doc = XmlManager.XmlProcessor.ReadFromXml<XmlNode>(fromFile_, new XmlScrubHandler());
             FileStream fs = File.Create(toFile_, 1000);
             StreamWriter sw = new StreamWriter(fs);
-            string XML = XmlProcessor.ToXml(doc);
+            string XML = XmlProcessor.XmlDeclaration + XmlProcessor.ToXml(doc,false);
             sw.Write(XML);
             sw.Close();
             

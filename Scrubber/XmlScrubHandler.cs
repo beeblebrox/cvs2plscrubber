@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using XmlManager;
+using System.Text.RegularExpressions;
 
 namespace Scrubber
 {
@@ -14,9 +15,15 @@ namespace Scrubber
         private XmlNode wNode_ = null; //Working Node
         private Stack<XmlNode>  parentNodeStack_ = null;
         private XmlNode pNode_ = null; //Current Parrent Node
-
+        private Dictionary<string, string> pathMap_ = new Dictionary<string, string>();
+        private HashSet<string> randoms = new HashSet<string>();
+        private       Random rnd = new Random();
+ 
         private static SortedSet<string> SKIPPED_NODES = null;
         private static SortedSet<string> EMPTIED_NODES = null;
+        private static SortedSet<string> SCRUBBED_NODES = null;
+        private static Regex DIR_PATTERN = new Regex("(?<pathelem>[^/]*)/");
+        private static Regex FDIR_PATTERN = new Regex(@"(?<pathelem>.*)/(?<fname>.+?)(?:(?<ext>\.[^.]*$)|$)");
         private static object lock_ = new object();
         public XmlScrubHandler()
         {
@@ -47,9 +54,25 @@ namespace Scrubber
                         EMPTIED_NODES.Add("msg");
                     }
                 }
+            if (SCRUBBED_NODES == null)
+                lock (lock_)
+                {
+                    if (SCRUBBED_NODES == null)
+                    {
+                        SCRUBBED_NODES = new SortedSet<string>();
+                        SCRUBBED_NODES.Add("author");
+                        SCRUBBED_NODES.Add("name");
+                        SCRUBBED_NODES.Add("branch");
+                        SCRUBBED_NODES.Add("tag");
+                        SCRUBBED_NODES.Add("utag");
+                        SCRUBBED_NODES.Add("commondir");
+                    }
+                }            
             unknownTags_ = new SortedSet<string>();
             parentNodeStack_ = new Stack<XmlNode>();
-
+            //TODO: Add options for forced values
+            randoms.Add("documents");
+            pathMap_.Add("documents", "bugged");
         }
         public void StartDocument()
         {
@@ -79,7 +102,7 @@ namespace Scrubber
                     throw new Exception("Root node isn't changelog'.");
                 }
             }
-            if (SKIPPED_NODES.Contains(qName) || EMPTIED_NODES.Contains(qName))
+            if (SKIPPED_NODES.Contains(qName) || EMPTIED_NODES.Contains(qName) || SCRUBBED_NODES.Contains(qName))
                 goto postProcess;
 
             if (pNode_ == null) //skip parsing.
@@ -91,9 +114,6 @@ namespace Scrubber
                 //TODO option to not write skipped nodes.
                 Console.WriteLine("Unknown tag(s) not scrubbed named: " + qName);
             }
-
-            
-
             postProcess:
             {
                 pNode_.AddChild(wNode_);
@@ -127,7 +147,12 @@ namespace Scrubber
             {
                 return;
             }
-
+            //The scrubbed nodes needs to be process
+            if (SCRUBBED_NODES.Contains(wNode_.Name))
+            {
+                wNode_.Text = scrubText(text);
+                return;
+            }
             //TODO, add option to wipe unkown text or ignore it.
             //This is also a failsafe and only prints if the tag was known at the time of
             //writting this but unknow that it could contain text.
@@ -135,6 +160,86 @@ namespace Scrubber
             {
                 Console.WriteLine("Unkown text encounterd in " + pNode_.Name + ": " + text);
             }
+        }
+        private string randomString()
+        {
+           
+            StringBuilder sb = new StringBuilder();
+            string result;
+            do
+            {
+                int ccount = rnd.Next(3, 10);
+                sb.Clear();
+                while (ccount-- > 0)
+                {
+                    sb.Append(Convert.ToChar(rnd.Next(0, 25) + 65));
+                }
+                result = sb.ToString();
+            } while (randoms.Contains(result));
+            return result;
+        }
+        private string scrubText(string text)
+        {
+            string original = text;
+            string replacement;
+            if (text.Length == 0) return text;
+
+            MatchCollection res = DIR_PATTERN.Matches(text);
+            if (res.Count == 0)
+            {
+                if (pathMap_.TryGetValue(original, out replacement))
+                {
+                    return replacement;
+                }
+                replacement = randomString();
+                pathMap_.Add(original, replacement);
+                randoms.Add(replacement);
+                return replacement;
+            }
+            
+            replacement = "SCRUBBED";
+            StringBuilder scrubdir = new StringBuilder();
+            List<string> replacements = new List<string>();
+            foreach (Match m in res)
+            {
+                if (!m.Success)
+                {
+                    continue;
+                }
+                else
+                {
+                    original = m.Result("${pathelem}");
+                }
+                if (pathMap_.TryGetValue(original, out replacement))
+                {
+                    replacements.Add(replacement);
+                }
+                else
+                {
+                    replacement = randomString();
+                    pathMap_.Add(original, replacement);
+                    randoms.Add(replacement);
+                }
+                scrubdir.Append(replacement).Append("/");
+            }
+            Match fmatch = FDIR_PATTERN.Match(text);
+            if (fmatch.Success)
+            {
+                original = fmatch.Result("${fname}");
+
+                if (pathMap_.TryGetValue(original, out replacement))
+                {
+                    replacements.Add(replacement);
+                }
+                else
+                {
+                    replacement = randomString();
+                    pathMap_.Add(original, replacement);
+                    randoms.Add(replacement);
+                }
+                scrubdir.Append(replacement).Append(fmatch.Result("${ext}"));
+            }
+            return scrubdir.ToString();
         }
 
         public XmlNode Get()
